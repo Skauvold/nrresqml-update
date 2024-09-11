@@ -3,20 +3,17 @@ import h5py
 import pathlib
 import tqdm
 import json
-
-from nrresqml.summarization.resqmldata import ResQmlData
 from nrresqml.summarization.thumbnail import make_thumbnail_image
 
 
 def summarize_resqml(fn: pathlib.Path, outdir: pathlib.Path) -> None:
     resqml_data = _read_resqml(fn)
     archel_stats = _compute_archel_stats(resqml_data)
-    legend = make_thumbnail_image(resqml_data, outdir)
-    archel_stats["thumbnail_legend"] = legend
-    _dump_model_description(archel_stats, outdir)
+    _dump_archel_stats(archel_stats, outdir)
+    make_thumbnail_image(resqml_data, outdir)
 
 
-def _read_resqml(fn: pathlib.Path) -> ResQmlData:
+def _read_resqml(fn: pathlib.Path) -> dict:
     fn_str = str(fn)
     data = h5py.File(fn_str.replace(".epc", ".h5"), mode="r")
     cps_key = [c for c in data.keys() if c.startswith("control_points")][0]
@@ -49,14 +46,25 @@ def _read_resqml(fn: pathlib.Path) -> ResQmlData:
 
     cell_volumes = _compute_cell_volumes(cpp_full, dx, dy)
 
-    return ResQmlData(x0, y0, dx, dy, nx, ny, nz, archel, cell_volumes, fn.stem)
+    return {
+        "x0": x0,
+        "y0": y0,
+        "dx": dx,
+        "dy": dy,
+        "nx": nx,
+        "ny": ny,
+        "nz": nz,
+        "archel": archel,
+        "cell_volumes": cell_volumes,
+        "model_name": fn.stem,
+    }
 
 
-def _compute_archel_stats(resqml_data: ResQmlData) -> dict:
-    archel = resqml_data.archel
+def _compute_archel_stats(resqml_data: dict) -> dict:
+    archel = resqml_data["archel"]
     archel_values = np.unique(archel)
     archel_counts = np.zeros_like(archel_values)
-    cell_volumes = resqml_data.cell_volumes
+    cell_volumes = resqml_data["cell_volumes"]
     total_volume = np.sum(cell_volumes)
     archel_volumes = np.zeros_like(archel_values)
     for i, v in tqdm.tqdm(
@@ -84,22 +92,16 @@ def _compute_archel_stats(resqml_data: ResQmlData) -> dict:
     }
 
     return {
-        "model_name": resqml_data.model_name,
+        "model_name": resqml_data["model_name"],
         "archel_cell_counts": counts,
         "archel_cell_count_proportions": proportions,
         "archel_volume_fractions": volume_fractions,
-        "boundingbox": {
-            "x0": resqml_data.x0,
-            "x1": resqml_data.x0 + resqml_data.dx * resqml_data.nx,
-            "y0": resqml_data.y0,
-            "y1": resqml_data.y0 + resqml_data.dy * resqml_data.ny,
-        }
     }
 
 
-def _dump_model_description(archel_stats: dict, outdir: pathlib.Path) -> None:
+def _dump_archel_stats(archel_stats: dict, outdir: pathlib.Path) -> None:
     model_name = archel_stats["model_name"]
-    fn_out = outdir / f"{model_name}_description.json"
+    fn_out = outdir / f"{model_name}_archel_stats.json"
 
     outdir.mkdir(parents=True, exist_ok=True)
     with open(fn_out, "w") as f:
